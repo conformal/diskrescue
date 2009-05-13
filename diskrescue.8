@@ -1,0 +1,78 @@
+.\"	$diskrescue$
+.\"
+.\" Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
+.\"
+.\" Permission to use, copy, modify, and distribute this software for any
+.\" purpose with or without fee is hereby granted, provided that the above
+.\" copyright notice and this permission notice appear in all copies.
+.\"
+.\" THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+.\" WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+.\" MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+.\" ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+.\" WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+.\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+.\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+.\"
+.Dd $Mdocdate$
+.Dt DISKRESCUE 1
+.Os
+.Sh NAME
+.Nm diskrescue
+.Nd disk recovery tool
+.Sh SYNOPSIS
+.Nm
+.Bk -words
+.Op Fl qv
+.Op Fl R Ar results file
+.Op Fl b Ar block size
+.Op Fl o Ar out file
+.Op Fl r Ar raw device
+.Ar operation
+.Ek
+.Sh DESCRIPTION
+.Nm
+is a tool to recover as much data as possible from failed disks.
+.Pp
+
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl b Ar block size
+This is the block size that the disk uses to read and write data.
+A large value speeds things up and once a bad spot on the disk is hit
+.Nm
+reverts to the natural blocksize of 512 bytes during the recovery process.
+Default is 512, which is very slow!
+.It Fl q
+Don't report completion percentage.
+.It Fl v
+Print version number and exit.
+.It Ar operation
+This is a standard formatted hostsfile that contains all blacklisted entries.
+Examples of good blacklist files:
+.Bd -literal -offset indent
+http://rlwpx.free.fr/WPFF/hosts.htm
+http://www.mvps.org/winhelp2002/
+.Ed
+.El
+.Pp
+.Sh HISTORY
+.Nm
+was written to recover a disk of a friend and it became useful enough for
+the general public.
+.Sh AUTHORS
+.An -nosplit
+.Pp
+.Nm
+was written by
+.An Marco Peereboom Aq marco@peereboom.us .
+.Sh DISCLAIMER
+Use this at your own risk!
+Recovering disks can make them worse and the author takes no responsibility
+for any data loss or corruption.
+Also when used wrong a good disk could be overwritten permanently losing
+all data on it.
+Use this tool wisely and leave the author alone if you mess up.
+.Sh BUGS
+Lots of features are still missing.
