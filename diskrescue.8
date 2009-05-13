@@ -32,31 +32,64 @@
 .Ek
 .Sh DESCRIPTION
 .Nm
-is a tool to recover as much data as possible from failed disks.
+is a tool to verify and/or recover as much data as possible from failed
+disks.
 .Pp
-
+The idea is to read all sectors of a disk and let the disk reallocate bad
+or soon to be bad sectors.
+While the disk is being read it can clone the data to a file or a disk as well.
+The resulting disk/file can be checked with
+.Xr fsck 8
+and analyzed with
+.Xr dumpfs 8
+and
+.Xr fsdb 8
+while not having to deal with a failing disk.
+.Pp
+When a sector can not be read it will be filled with zeroes and
+.Nm
+continues on to the next sector.
+For all intents and purposes this is a fancy
+.Xr dd 1
+that takes some of the complexity out of dealing with a failed disk.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
+.It Fl R Ar results file
+Write the results of the rescue process to the specified file.
 .It Fl b Ar block size
 This is the block size that the disk uses to read and write data.
 A large value speeds things up and once a bad spot on the disk is hit
 .Nm
-reverts to the natural blocksize of 512 bytes during the recovery process.
+reverts to the natural block size of 512 bytes during the recovery process.
 Default is 512, which is very slow!
+The argument accepts the following quantifiers: b, k, m, g and the following
+multipliers: * and x.
+For example 1 mega byte can be expressed as: -b 1m or -b 1k*1k
+.It Fl o Ar out file or disk
+This is the target file or disk of the operation.
 .It Fl q
 Don't report completion percentage.
+.It Fl r Ar raw disk
+This is the raw disk device that will be attempted to be recovered.
+For example: /dev/rsd2c
 .It Fl v
 Print version number and exit.
 .It Ar operation
-This is a standard formatted hostsfile that contains all blacklisted entries.
-Examples of good blacklist files:
-.Bd -literal -offset indent
-http://rlwpx.free.fr/WPFF/hosts.htm
-http://www.mvps.org/winhelp2002/
-.Ed
+.Bl -tag -width Ds -offset indent -compact
+.It Cm verify
+The verify operation reads the entire disk and lets it do its thing to
+reallocate bad or questionable blocks.
+.It Cm recover
+Essentially the same as verify but write the read data to a file or disk.
+.El
 .El
 .Pp
+.Sh SEE ALSO
+.Xr dd 1
+.Xr fsck 8
+.Xr dumpfs 8
+.Xr fsdb 8
 .Sh HISTORY
 .Nm
 was written to recover a disk of a friend and it became useful enough for
