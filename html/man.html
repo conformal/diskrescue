@@ -1,0 +1,107 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+<title>diskrescue.1.html</title>
+<meta name="Generator" content="Vim/7.2">
+<meta http-equiv="content-type" content="text/html; charset=iso-8859-1">
+</head>
+<body text="#ffffff" bgcolor="#000000"><font face="monospace">
+<font color="#ff40ff">DISKRESCUE(1)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;OpenBSD Reference Manual&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;DISKRESCUE(1)</font><br>
+<br>
+<font color="#ffff00">NAME</font><br>
+&nbsp;&nbsp;&nbsp;&nbsp; diskrescue - disk recovery tool<br>
+<br>
+<font color="#ffff00">SYNOPSIS</font><br>
+&nbsp;&nbsp;&nbsp;&nbsp; diskrescue [-aqv] [-R results file] [-b block size] [-o out file]<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[-r raw device] operation<br>
+<br>
+<font color="#ffff00">DESCRIPTION</font><br>
+&nbsp;&nbsp;&nbsp;&nbsp; diskrescue is a tool to verify and/or recover as much data as possible<br>
+&nbsp;&nbsp;&nbsp;&nbsp; from failed disks.<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp; The idea is to read all sectors of a disk and let the disk reallocate bad<br>
+&nbsp;&nbsp;&nbsp;&nbsp; or soon to be bad sectors.&nbsp;&nbsp;While the disk is being read it can clone the<br>
+&nbsp;&nbsp;&nbsp;&nbsp; data to a file or a disk as well.&nbsp;&nbsp;The resulting disk/file can be checked<br>
+&nbsp;&nbsp;&nbsp;&nbsp; with <font color="#ff40ff">fsck(8)</font>&nbsp;and analyzed with <font color="#ff40ff">dumpfs(8)</font>&nbsp;and <font color="#ff40ff">fsdb(8)</font>&nbsp;while not having to<br>
+&nbsp;&nbsp;&nbsp;&nbsp; deal with a failing disk.<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp; When a sector can not be read it will be filled with zeroes and<br>
+&nbsp;&nbsp;&nbsp;&nbsp; diskrescue continues on to the next sector.&nbsp;&nbsp;For all intents and purposes<br>
+&nbsp;&nbsp;&nbsp;&nbsp; this is a fancy <font color="#ff40ff">dd(1)</font>&nbsp;that takes some of the complexity out of dealing<br>
+&nbsp;&nbsp;&nbsp;&nbsp; with a failed disk.<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp; The options are as follows:<br>
+<br>
+<font color="#ff6060">&nbsp;&nbsp;&nbsp;&nbsp; -R</font>&nbsp;results file<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Write the results of the rescue process to the specified file.<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; If the results file already exists the program will attempt to<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; restart the recovery.&nbsp;&nbsp;Other parameters such as block size and<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; out file can not be specified when attempting to restart a recov-<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ery.<br>
+<br>
+<font color="#ff6060">&nbsp;&nbsp;&nbsp;&nbsp; -a</font>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Abort on read error.<br>
+<br>
+<font color="#ff6060">&nbsp;&nbsp;&nbsp;&nbsp; -b</font>&nbsp;block size<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; This is the block size that the disk uses to read and write data.<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; A large value speeds things up and once a bad spot on the disk is<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; hit diskrescue reverts to the natural block size of 512 bytes<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; during the recovery process.&nbsp;&nbsp;Default is 512, which is very slow!<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; The argument accepts the following quantifiers: b, k, m, g and<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; the following multipliers: * and x.&nbsp;&nbsp;For example 1 mega byte can<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; be expressed as: -b 1m or -b 1k*1k<br>
+<br>
+<font color="#ff6060">&nbsp;&nbsp;&nbsp;&nbsp; -o</font>&nbsp;out file or disk<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; This is the target file or disk of the operation.<br>
+<br>
+<font color="#ff6060">&nbsp;&nbsp;&nbsp;&nbsp; -q</font>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Don't report completion percentage.<br>
+<br>
+<font color="#ff6060">&nbsp;&nbsp;&nbsp;&nbsp; -r</font>&nbsp;raw disk<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; This is the raw disk device that will be attempted to be recov-<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ered.&nbsp;&nbsp;For example: /dev/rsd2c<br>
+<br>
+<font color="#ff6060">&nbsp;&nbsp;&nbsp;&nbsp; -v</font>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Print version number and exit.<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp; operation<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; verify&nbsp;&nbsp;The verify operation reads the entire disk and lets<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; it do its thing to reallocate bad or questionable<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; blocks.<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; recover<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Essentially the same as verify but write the read<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; data to a file or disk.<br>
+<br>
+<font color="#ffff00">SEE ALSO</font><br>
+&nbsp;&nbsp;&nbsp;&nbsp; <font color="#ff40ff">dd(1)</font>&nbsp;<font color="#ff40ff">fsck(8)</font>&nbsp;<font color="#ff40ff">dumpfs(8)</font>&nbsp;<font color="#ff40ff">fsdb(8)</font><br>
+<br>
+<font color="#ffff00">HISTORY</font><br>
+&nbsp;&nbsp;&nbsp;&nbsp; diskrescue was written to recover a disk of a friend and it became useful<br>
+&nbsp;&nbsp;&nbsp;&nbsp; enough for the general public.<br>
+<br>
+<font color="#ffff00">AUTHORS</font><br>
+&nbsp;&nbsp;&nbsp;&nbsp; diskrescue was written by Marco Peereboom &lt;marco@peereboom.us&gt;.<br>
+<br>
+<font color="#ffff00">EXAMPLES</font><br>
+&nbsp;&nbsp;&nbsp;&nbsp; Verify a disk and force it to reallocate bad blocks:<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; diskrescue -b 1m -r /dev/rsd2c verify<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp; Recover a disk to a file and write a results file:<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; diskrescue -r /dev/rsd2c -R res -o disk.img -b 1m recover<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp; Restart a recovery operation with a results file:<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; diskrescue -r /dev/rsd2c -R res recover<br>
+<br>
+<font color="#ffff00">DISCLAIMER</font><br>
+&nbsp;&nbsp;&nbsp;&nbsp; Use this at your own risk!&nbsp;&nbsp;Recovering disks can make them worse and the<br>
+&nbsp;&nbsp;&nbsp;&nbsp; author takes no responsibility for any data loss or corruption.&nbsp;&nbsp;Also<br>
+&nbsp;&nbsp;&nbsp;&nbsp; when used wrong a good disk could be overwritten permanently losing all<br>
+&nbsp;&nbsp;&nbsp;&nbsp; data on it.&nbsp;&nbsp;Use this tool wisely and leave the author alone if you mess<br>
+&nbsp;&nbsp;&nbsp;&nbsp; up.<br>
+<br>
+<font color="#ffff00">BUGS</font><br>
+&nbsp;&nbsp;&nbsp;&nbsp; Lots of features are still missing.<br>
+<br>
+OpenBSD 4.6&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; September 27, 2009&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 2<br>
+</font></body>
+</html>
