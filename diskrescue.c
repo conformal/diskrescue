@@ -36,9 +36,10 @@ static const char	*cvstag = "$diskrescue$";
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#define	VERSION		"0.2"
+#define	VERSION		"0.3"
 /*
  * todo:
+ *	add restore operation
  *	add blocks to GLIST
  *	add more scsi/sata magic to "heal" a disk
  */
@@ -329,7 +330,7 @@ main(int argc, char *argv[])
 {
 	FILE			*ofd = NULL;
 	char			*rawdev = NULL, *outfile = NULL, *resfile = NULL;
-	daddr64_t		size = 0, bs = 512;
+	daddr64_t		size = 0, bs = DEV_BSIZE;
 	daddr64_t		offs, sz, start = 0;
 	int			fd, c, rv, i, operation = OPC_INVALID, exists = 0;
 	int			abort_on_error = 0;
@@ -370,6 +371,9 @@ main(int argc, char *argv[])
 			    VERSION, cvstag);
 			exit(1);
 			break;
+		default:
+			usage();
+			/* NOTREACHED */
 		}
 	}
 
@@ -448,7 +452,7 @@ iargs:
 			if (outfile)
 				errx(1,
 				    "can't specify outfile when restarting");
-			if (bs != 512)
+			if (bs != DEV_BSIZE)
 				errx(1,
 				    "can't specify block size when restarting");
 			mode = "r+";
@@ -500,7 +504,7 @@ iargs:
 			/* setup size */
 			sz = MIN(size - offs, bs);
 			if (fseeko(ofd, start, SEEK_SET))
-				err(1, "fsseko");
+				err(1, "fseeko");
 			if (!quiet)
 				printf("restarting at: %llu\n", start);
 		}
@@ -528,6 +532,11 @@ iargs:
 				printf("read failed, aborting\n");
 				goto done;
 			}
+
+			/* make sure we are flushed before we recover */
+			fflush(ofd);
+			fflush(resfd);
+
 			rv = recover(offs, fd, inbuf, sz);
 			if (rv == 0)
 				errx(1, "full recover unexpected eof");
