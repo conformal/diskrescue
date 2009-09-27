@@ -24,7 +24,11 @@ static const char	*cvstag = "$diskrescue$";
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
+#include <signal.h>
 
+#include <crypto/sha1.h>
+
+#include <sys/syslimits.h>
 #include <sys/param.h>
 #include <sys/disklabel.h>
 #include <sys/dkio.h>
@@ -32,7 +36,7 @@ static const char	*cvstag = "$diskrescue$";
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#define	VERSION		"0.1"
+#define	VERSION		"0.2"
 /*
  * todo:
  *	rewrite whole disk
@@ -41,6 +45,18 @@ static const char	*cvstag = "$diskrescue$";
  *	add skip offset
  *	add continue option in case of bombed kernel
  */
+
+struct dr_hdr {
+	daddr64_t		disk_sz;
+	daddr64_t		block_sz;
+	char			output[PATH_MAX];
+};
+
+struct dr_entry {
+	daddr64_t		offset;
+	daddr64_t		size;
+	char			digest[SHA1_DIGEST_LENGTH * 2 + 1];
+};
 
 /*
  * verify:	Verify entire media on disk to allow the drive to reallocate any
@@ -63,6 +79,128 @@ struct operations {
 
 FILE			*resfd = stderr;
 int			quiet = 0;
+volatile sig_atomic_t   running = 1;
+
+void
+sighdlr(int sig)
+{
+	switch (sig) {
+	case SIGINT:
+	case SIGTERM:
+	case SIGHUP:
+	case SIGQUIT:
+		running = 0;
+		break;
+	}
+}
+
+void
+installsignal(int sig, char *name)
+{
+	struct sigaction	sa;
+
+	sa.sa_handler = sighdlr;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = 0;
+	if (sigaction(sig, &sa, NULL) == -1)
+		err(1, "could not install %s handler", name);
+}
+
+int
+hdr_write(FILE *f, struct dr_hdr *h)
+{
+	if (f == NULL || h == NULL)
+		return (-1);
+
+	if (fprintf(f, "%llu %llu %.1024s\n",
+	    h->disk_sz, h->block_sz, h->output) <= 0)
+		err(1, "hdr_write: fprintf");
+	fflush(f);
+
+	return (0);
+}
+
+int
+hdr_read(FILE *f, struct dr_hdr *h)
+{
+	int			rv = 0;
+
+	if (f == NULL || h == NULL)
+		return (-1);
+
+	rewind(f);
+	rv = fscanf(f, "%llu %llu %1024s",
+	    &h->disk_sz, &h->block_sz, h->output);
+	if (rv != 3)
+		return (-1);
+
+	return (0);
+}
+
+int
+ent_write(FILE *f, daddr64_t offset, daddr64_t sz, char *inbuf)
+{
+	u_int8_t		digest[SHA1_DIGEST_LENGTH];
+	char			digest_text[SHA1_DIGEST_LENGTH * 2 + 1];
+	SHA1_CTX		ctx;
+	int			i;
+
+	if (f == NULL || inbuf == NULL || sz == 0)
+		return (-1);
+
+	SHA1Init(&ctx);
+	SHA1Update(&ctx, inbuf, sz);
+	SHA1Final((u_int8_t *)&digest, &ctx);
+	for (i = 0; i < SHA1_DIGEST_LENGTH; i++)
+		snprintf(&digest_text[i * 2], 3, "%02x", digest[i]);
+
+	if (fprintf(f, "%llu %llu %.40s\n", offset, sz, digest_text) <= 0)
+		err(1, "ent_write: fprintf");
+	fflush(f);
+
+	return (0);
+}
+
+int
+ent_read(FILE *f, FILE *outf, struct dr_entry *e)
+{
+	u_int8_t		digest[SHA1_DIGEST_LENGTH];
+	char			digest_text[SHA1_DIGEST_LENGTH * 2 + 1];
+	SHA1_CTX		ctx;
+	int			i;
+	u_int8_t		*buf;
+	int			rv = 0;
+
+	if (f == NULL || e == NULL)
+		return (-1);
+
+	rv = fscanf(f, "%llu %llu %40s", &e->offset, &e->size, e->digest);
+	if (rv != 3)
+		return (-1);
+
+	if (outf) {
+		buf = malloc(e->size);
+		if (buf == NULL)
+			err(1, "ent_read: malloc");
+		if (fseeko(outf, e->offset, SEEK_SET))
+			err(1, "ent_read: fsseko");
+		if (fread(buf, e->size, 1, outf) != 1)
+			err(1, "ent_read fread");
+
+		SHA1Init(&ctx);
+		SHA1Update(&ctx, buf, e->size);
+		SHA1Final((u_int8_t *)&digest, &ctx);
+		for (i = 0; i < SHA1_DIGEST_LENGTH; i++)
+			snprintf(&digest_text[i * 2], 3, "%02x", digest[i]);
+		if (strcmp(digest_text, e->digest))
+			errx(1, "outfile has an invalid digest at offset %llu",
+			    e->offset);
+
+		free(buf);
+	}
+
+	return (0);
+}
 
 int
 rawsize(int fd, daddr64_t *size)
@@ -144,10 +282,7 @@ readoffset(daddr64_t offs, int fd, char *buf, daddr64_t bs)
 {
 	int			rv;
 
-	if (lseek(fd, offs, SEEK_SET) == -1)
-		err(1, "lseek");
-
-	rv = read(fd, buf, bs);
+	rv = pread(fd, buf, bs, offs);
 	if (rv == -1)
 		bzero(buf, bs);
 
@@ -186,7 +321,7 @@ usage(void)
 	extern char		*__progname;
 
 	fprintf(stderr,
-		"usage: %s [-qv] [-R results file] [-b block size] "
+		"usage: %s [-aqv] [-R results file] [-b block size] "
 		"[-o out file] [-r raw device] operation\n",
 		__progname);
 	
@@ -197,18 +332,24 @@ main(int argc, char *argv[])
 {
 	FILE			*ofd = NULL;
 	char			*rawdev = NULL, *outfile = NULL, *resfile = NULL;
-	daddr64_t		size, bs = 512;
-	daddr64_t		offs, sz;
-	int			fd, c, rv, i, operation = OPC_INVALID;
-	char			*inbuf, *error = "no error";
+	daddr64_t		size = 0, bs = 512;
+	daddr64_t		offs, sz, start = 0;
+	int			fd, c, rv, i, operation = OPC_INVALID, exists = 0;
+	int			abort_on_error = 0;
+	char			*inbuf, *error = "no error", *mode = "w+";
 	struct stat		sb;
 	double			p = 0;
+	struct dr_hdr		hdr;
+	struct dr_entry		entry;
 
-	while ((c = getopt(argc, argv, "R:b:r:qo:v")) != -1) {
+	while ((c = getopt(argc, argv, "R:ab:r:qo:v")) != -1) {
 		switch (c) {
 		case 'R':
 			/* result file */
 			resfile = optarg;
+			break;
+		case 'a':
+			abort_on_error = 1;
 			break;
 		case 'b':
 			/* read/write block size */
@@ -266,7 +407,7 @@ main(int argc, char *argv[])
 			error = "must supply raw device";
 			goto iargs;
 		}
-		if (outfile == NULL) {
+		if (outfile == NULL && resfile == NULL) {
 			error = "must supply an out file";
 			goto iargs;
 		}
@@ -279,11 +420,6 @@ iargs:
 		    ops[operation].op, error);
 	}
 
-	/* here we go */
-	inbuf = malloc(bs);
-	if (inbuf == NULL)
-		err(1, "inbuf");
-
 	/* are we the full raw device? */
 	if (rawdev == NULL)
 		errx(1, "must supply raw device");
@@ -294,40 +430,107 @@ iargs:
 	if (rawdev[strlen(rawdev) - 1] != 'c')
 		errx(1, "must use c partition");
 
-	/* open out file */
-	if (outfile)
-		if ((ofd = fopen(outfile, "w+")) == NULL)
-			err(1, "fopen outfile");
-
-	/* open disk */
+	/* open raw disk */
 	if ((fd = open(rawdev, O_RDWR, 0)) == -1)
 		err(1, "can't open %s", rawdev);
 	if (rawsize(fd, &size))
 		errx(1, "can't obtain raw size");
+	if (size == 0)
+		errx(1, "invalid disk size");
 
-	/* open resulys file */
+	/* open results file */
+	bzero(&hdr, sizeof hdr);
 	if (resfile != NULL) {
-		/*
-		 * XXX interpret results file instead to continue where we
-		 * left of
-		 */
 		if (!lstat(resfile, &sb))
-			errx(1, "results file exists");
-		if ((resfd = fopen(resfile, "w+")) == NULL)
+			exists = 1;
+		if ((resfd = fopen(resfile, "a+")) == NULL)
 			err(1, "results file");
+
+		if (exists) {
+			/* retrieve state */
+			if (outfile)
+				errx(1,
+				    "can't specify outfile when restarting");
+			if (bs != 512)
+				errx(1,
+				    "can't specify block size when restarting");
+			mode = "r+";
+			/* get parameters from results file */
+			if (hdr_read(resfd, &hdr))
+				errx(1, "invalid header");
+			if (hdr.disk_sz != size)
+				errx(1, "invalid disk size in header");
+			if (hdr.block_sz % DEV_BSIZE)
+				errx(1, "invalid block size in header");
+			if (strlen(hdr.output) == 0)
+				errx(1, "invalid filename in header");
+
+			bs = hdr.block_sz;
+			outfile = hdr.output;
+		} else {
+			/* get state from options */
+			mode = "w+";
+			hdr.disk_sz = size;
+			hdr.block_sz = bs;
+			if (outfile)
+				strlcpy(hdr.output, outfile, sizeof hdr.output);
+
+			if (hdr_write(resfd, &hdr))
+				err(1, "hdr_write");
+		}
 	}
 
-	fprintf(resfd, "disk size : %llu\n", size);
-	fprintf(resfd, "block size: %llu\n", bs);
-	fflush(resfd);
+	/* open out file */
+	if (outfile) {
+		if ((ofd = fopen(outfile, mode)) == NULL)
+			err(1, "fopen outfile");
 
-	for (offs = 0; offs < size; offs += sz) {
+		if (exists) {
+			bzero(&entry, sizeof entry);
+			entry.size = bs;
+			do {
+				if (ent_read(resfd, ofd, &entry))
+					break;
+			} while (!feof(resfd));
+			start = entry.offset + entry.size;
+
+			if (start >= size) {
+				if (!quiet)
+					printf("no need to restart\n");
+				goto done;
+			}
+
+			/* setup size */
+			sz = MIN(size - offs, bs);
+			if (fseeko(ofd, start, SEEK_SET))
+				err(1, "fsseko");
+			if (!quiet)
+				printf("restarting at: %llu\n", start);
+		}
+	}
+
+	/* here we go */
+	inbuf = malloc(bs);
+	if (inbuf == NULL)
+		err(1, "inbuf");
+
+	/* handle some signals */
+	installsignal(SIGINT, "INT");
+	installsignal(SIGHUP, "HUP");
+	installsignal(SIGQUIT, "QUIT");
+	installsignal(SIGTERM, "TERM");
+
+	for (offs = start; offs < size; offs += sz) {
 		sz = MIN(size - offs, bs);
 
 		rv = readoffset(offs, fd, inbuf, sz);
 		if (rv == 0)
 			errx(1, "unexpected eof");
 		else if (rv == -1) {
+			if (abort_on_error) {
+				printf("read failed, aborting\n");
+				goto done;
+			}
 			rv = recover(offs, fd, inbuf, sz);
 			if (rv == 0)
 				errx(1, "full recover unexpected eof");
@@ -340,13 +543,33 @@ iargs:
 		if (outfile)
 			if (fwrite(inbuf, sz, 1, ofd) == -1)
 				err(1, "fwrite");
+
+		if (resfile) {
+			if (ent_write(resfd, offs, sz, inbuf))
+				errx(1, "can't write results");
+		}
+
 		if (!quiet) {
 			p = 1 - (((double)size - (double)offs) / (double)size);
 			printf("\r%.1f%%", p * 100);
 			fflush(stdout);
 		}
+
+		if (running == 0) {
+			if (!quiet)
+				printf("terminating\n");
+			break;
+		}
 	}
-	printf("\n");
+	if (!quiet && running == 1)
+		printf("\r%.1f%%\n", 100.0);
+
+done:
+	fflush(ofd);
+	fflush(resfd);
+	fclose(ofd);
+	fclose(resfd);
+	close(fd);
 
 	return (0);
 }
