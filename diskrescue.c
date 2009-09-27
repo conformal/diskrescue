@@ -571,10 +571,14 @@ iargs:
 		printf("\r%.1f%%\n", 100.0);
 
 done:
-	fflush(ofd);
-	fflush(resfd);
-	fclose(ofd);
-	fclose(resfd);
+	if (ofd) {
+		fflush(ofd);
+		fclose(ofd);
+	}
+	if (resfd) {
+		fflush(resfd);
+		fclose(resfd)
+	};
 	close(fd);
 
 	return (0);
