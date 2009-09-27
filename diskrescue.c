@@ -39,10 +39,8 @@ static const char	*cvstag = "$diskrescue$";
 #define	VERSION		"0.2"
 /*
  * todo:
- *	rewrite whole disk
  *	add blocks to GLIST
  *	add more scsi/sata magic to "heal" a disk
- *	add skip offset
  */
 
 struct dr_hdr {
