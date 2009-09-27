@@ -43,7 +43,6 @@ static const char	*cvstag = "$diskrescue$";
  *	add blocks to GLIST
  *	add more scsi/sata magic to "heal" a disk
  *	add skip offset
- *	add continue option in case of bombed kernel
  */
 
 struct dr_hdr {
