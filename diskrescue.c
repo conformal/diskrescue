@@ -68,7 +68,7 @@ struct operations {
 	int		opcode;
 #define OPC_VERIFY	(0)
 #define OPC_RECOVER	(1)
-#define OPC_INVALID	(255) /* must be last */
+#define OPC_INVALID	(2) /* must be last */
 } ops[] = {
 	{ "verify", OPC_VERIFY },
 	{ "recover", OPC_RECOVER },
