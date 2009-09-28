@@ -26,13 +26,14 @@
 .Op Fl aqv
 .Op Fl R Ar results file
 .Op Fl b Ar block size
+.Op Fl i Ar in file
 .Op Fl o Ar out file
 .Op Fl r Ar raw device
 .Ar operation
 .Ek
 .Sh DESCRIPTION
 .Nm
-is a tool to verify and/or recover as much data as possible from failed
+is a tool to verify, recover and restore as much data as possible from failed
 disks.
 .Pp
 The idea is to read all sectors of a disk and let the disk reallocate bad
@@ -49,6 +50,11 @@ while not having to deal with a failing disk.
 When a sector can not be read it will be filled with zeroes and
 .Nm
 continues on to the next sector.
+.Pp
+Alternatively,
+.Nm
+can also restore an image onto a disk or other file.
+.Pp
 For all intents and purposes this is a fancy
 .Xr dd 1
 that takes some of the complexity out of dealing with a failed disk.
@@ -75,6 +81,13 @@ Default is 512, which is very slow!
 The argument accepts the following quantifiers: b, k, m, g and the following
 multipliers: * and x.
 For example 1 mega byte can be expressed as: -b 1m or -b 1k*1k
+.It Fl i Ar in file
+This is the source file for the restore operation.
+One can not use raw device as the
+.Fa in file
+; use the recover operation and the
+.Fa raw disk
+parameter instead.
 .It Fl o Ar out file or disk
 This is the target file or disk of the operation.
 .It Fl q
@@ -89,8 +102,16 @@ Print version number and exit.
 .It Cm verify
 The verify operation reads the entire disk and lets it do its thing to
 reallocate bad or questionable blocks.
+This operation can not be resumed if aborted.
 .It Cm recover
 Essentially the same as verify but write the read data to a file or disk.
+This operation can be resumed if aborted provided there is a valid
+.Fa results
+file.
+.It Cm restore
+Restore an image file to a disk or file.
+Restore can not be used to copy a raw device to a disk or file.
+This operation can not be resumed if aborted.
 .El
 .El
 .Pp
@@ -123,6 +144,11 @@ diskrescue -r /dev/rsd2c -R res -o disk.img -b 1m recover
 Restart a recovery operation with a results file:
 .Bd -literal -offset indent
 diskrescue -r /dev/rsd2c -R res recover
+.Ed
+.Pp
+Restore an image to a disk:
+.Bd -literal -offset indent
+diskrescue -b 1m -i disk.img -o /dev/rsd2c restore
 .Ed
 .Pp
 .Sh DISCLAIMER

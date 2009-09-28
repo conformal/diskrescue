@@ -39,7 +39,6 @@ static const char	*cvstag = "$diskrescue$";
 #define	VERSION		"0.3"
 /*
  * todo:
- *	add restore operation
  *	add blocks to GLIST
  *	add more scsi/sata magic to "heal" a disk
  */
@@ -68,16 +67,24 @@ struct operations {
 	int		opcode;
 #define OPC_VERIFY	(0)
 #define OPC_RECOVER	(1)
-#define OPC_INVALID	(2) /* must be last */
+#define OPC_RESTORE	(2)
+#define OPC_INVALID	(3) /* must be last */
 } ops[] = {
 	{ "verify", OPC_VERIFY },
 	{ "recover", OPC_RECOVER },
+	{ "restore", OPC_RESTORE },
 	{ NULL, OPC_INVALID }
 };
 
 FILE			*resfd = stderr;
 int			quiet = 0;
+int			abort_on_error = 0;
 volatile sig_atomic_t   running = 1;
+daddr64_t		bs = DEV_BSIZE;
+char			*rawdev = NULL;
+char			*outfile = NULL;
+char			*infile = NULL;
+char			*resfile = NULL;
 
 void
 sighdlr(int sig)
@@ -342,20 +349,269 @@ print_perc(daddr64_t size, daddr64_t offs, char *s, char *cr)
 }
 
 int
-main(int argc, char *argv[])
+recover_verify(int operation)
 {
 	FILE			*ofd = NULL;
-	char			*rawdev = NULL, *outfile = NULL, *resfile = NULL;
-	daddr64_t		size = 0, bs = DEV_BSIZE;
+	int			retval = 1;
+	daddr64_t		size = 0;
 	daddr64_t		offs, sz, start = 0;
-	int			fd, c, rv, i, operation = OPC_INVALID, exists = 0;
-	int			abort_on_error = 0;
-	char			*inbuf, *error = "no error", *mode = "w+";
+	int			rv, fd, exists = 0;
+	char			*inbuf, *mode = "w+";
 	struct stat		sb;
 	struct dr_hdr		hdr;
 	struct dr_entry		entry;
 
-	while ((c = getopt(argc, argv, "R:ab:r:qo:v")) != -1) {
+	/* are we the full raw device? */
+	if (rawdev == NULL)
+		errx(1, "restore_verify: must supply raw device");
+	if (lstat(rawdev, &sb))
+		err(1, "restore_verify: lstat");
+	if (!S_ISCHR(sb.st_mode))
+		errx(1, "restore_verify: not a raw device");
+	if (rawdev[strlen(rawdev) - 1] != 'c')
+		errx(1, "restore_verify: must use c partition");
+
+	/* open raw disk */
+	if ((fd = open(rawdev, O_RDWR, 0)) == -1)
+		err(1, "restore_verify: can't open %s", rawdev);
+	if (rawsize(fd, &size))
+		errx(1, "restore_verify: can't obtain raw size");
+	if (size == 0)
+		errx(1, "restore_verify: invalid disk size");
+
+	/* open results file */
+	bzero(&hdr, sizeof hdr);
+	if (resfile != NULL) {
+		if (!lstat(resfile, &sb))
+			exists = 1;
+		if ((resfd = fopen(resfile, "a+")) == NULL)
+			err(1, "restore_verify: results file");
+
+		if (exists) {
+			/* retrieve state */
+			if (outfile)
+				errx(1, "restore_verify: can't specify "
+				    "outfile when restarting");
+			if (bs != DEV_BSIZE)
+				errx(1, "restore_verify: can't specify block "
+				    "size when restarting");
+			mode = "r+";
+			/* get parameters from results file */
+			if (hdr_read(resfd, &hdr))
+				errx(1, "restore_verify: invalid header");
+			if (hdr.disk_sz != size)
+				errx(1, "restore_verify: invalid disk size in "
+				    "header");
+			if (hdr.block_sz % DEV_BSIZE)
+				errx(1, "restore_verify: invalid block size in "
+				    "header");
+			if (strlen(hdr.output) == 0)
+				errx(1, "restore_verify: invalid filename in "
+				    "header");
+
+			bs = hdr.block_sz;
+			outfile = hdr.output;
+		} else {
+			/* get state from options */
+			mode = "w+";
+			hdr.disk_sz = size;
+			hdr.block_sz = bs;
+			if (outfile)
+				strlcpy(hdr.output, outfile, sizeof hdr.output);
+
+			if (hdr_write(resfd, &hdr))
+				err(1, "restore_verify: hdr_write");
+		}
+	}
+
+	/* open out file */
+	if (outfile) {
+		if ((ofd = fopen(outfile, mode)) == NULL)
+			err(1, "restore_verify: fopen outfile");
+
+		if (exists) {
+			/* read res file and validate integrity */
+			if (lstat(outfile, &sb))
+				err(1, "restore_verify: lstat outfile");
+
+			bzero(&entry, sizeof entry);
+			entry.size = bs;
+			do {
+				if (ent_read(resfd, ofd, &entry))
+					break;
+
+				print_perc(sb.st_size, entry.offset,
+				    "validate", NULL);
+
+				if (running == 0) {
+					if (!quiet)
+						printf("\nterminating\n");
+					goto done;
+				}
+			} while (!feof(resfd));
+			print_perc(1, 1, "validate", "\n"); /* 100% */
+
+			start = entry.offset + entry.size;
+
+			if (start >= size) {
+				if (!quiet)
+					printf("no need to restart\n");
+				goto done;
+			}
+
+			/* setup size */
+			sz = MIN(size - offs, bs);
+			if (fseeko(ofd, start, SEEK_SET))
+				err(1, "restore_verify: fseeko");
+			if (!quiet)
+				printf("restarting at: %llu\n", start);
+		}
+	}
+
+	/* here we go */
+	inbuf = malloc(bs);
+	if (inbuf == NULL)
+		err(1, "restore_verify: inbuf");
+
+	for (offs = start; offs < size; offs += sz) {
+		sz = MIN(size - offs, bs);
+
+		rv = readoffset(offs, fd, inbuf, sz);
+		if (rv == 0)
+			errx(1, "restore_verify: unexpected eof");
+		else if (rv == -1) {
+			if (abort_on_error) {
+				printf("read failed, aborting\n");
+				goto done;
+			}
+
+			/* make sure we are flushed before we recover */
+			fflush(ofd);
+			fflush(resfd);
+
+			rv = recover(offs, fd, inbuf, sz);
+			if (rv == 0)
+				errx(1, "restore_verify: full recover "
+				    "unexpected eof");
+			else if (rv == -1)
+				errx(1, "restore_verify: full recover failed");
+			else if (rv != sz)
+				errx(1, "restore_verify: invalid size "
+				    "recovered");
+		}
+
+		if (outfile)
+			if (fwrite(inbuf, sz, 1, ofd) == -1)
+				err(1, "restore_verify: fwrite");
+
+		if (resfile) {
+			if (ent_write(resfd, offs, sz, inbuf))
+				errx(1, "restore_verify: can't write results");
+		}
+
+		print_perc(size, offs, ops[operation].op, NULL);
+		if (running == 0) {
+			if (!quiet)
+				printf("\nterminating\n");
+			break;
+		}
+	}
+	if (running == 1)
+		print_perc(1, 1, ops[operation].op, "\n"); /* 100% */
+
+	retval = 0;
+done:
+	if (ofd) {
+		fflush(ofd);
+		fclose(ofd);
+	}
+	if (resfd) {
+		fflush(resfd);
+		fclose(resfd);
+	}
+	close(fd);
+
+	return (retval);
+}
+
+int
+restore(int operation)
+{
+	FILE			*ofd = NULL, *ifd = NULL;
+	char			*buf = NULL;
+	daddr64_t		size = 0;
+	daddr64_t		offs, sz, start = 0;
+	int			rv = 1;
+	struct stat		sb;
+
+	buf = malloc(bs);
+	if (buf == NULL)
+		err(1, "restore: malloc buf");
+
+	ofd = fopen(outfile, "w+");
+	if (ofd == NULL)
+		err(1, "restore: fopen outfile");
+
+	ifd = fopen(infile, "r");
+	if (ifd == NULL)
+		err(1, "restore: fopen infile");
+	if (lstat(infile, &sb))
+		err(1, "restore: lstat infile");
+	/* make sure we are not a raw device */
+	if (S_ISCHR(sb.st_mode))
+		errx(1, "restore: can not use a raw device");
+	if (sb.st_size == 0)
+		errx(1, "restore: infile has zero length");
+	size = sb.st_size;
+
+	for (offs = start; offs < size; offs += sz) {
+		sz = MIN(size - offs, bs);
+
+		/* position file pointers */
+		if (fseeko(ifd, offs, SEEK_SET))
+			err(1, "restore: fseeko ifd");
+		if (fseeko(ofd, offs, SEEK_SET))
+			err(1, "restore: fseeko ofd");
+
+		/* read and write data */
+		if (fread(buf, sz, 1, ifd) <= 0)
+			err(1, "restore: fread ifd");
+		if (fwrite(buf, sz, 1, ofd) <= 0)
+			err(1, "restore fwrite ofd");
+
+		print_perc(size, offs, ops[operation].op, NULL);
+		if (running == 0) {
+			if (!quiet)
+				printf("\nterminating\n");
+			break;
+		}
+	}
+	if (running == 1)
+		print_perc(1, 1, ops[operation].op, "\n"); /* 100% */
+
+	rv = 0;
+
+	if (ofd) {
+		fflush(ofd);
+		fclose(ofd);
+	}
+	if (ifd) {
+		fflush(ifd);
+		fclose(ifd);
+	}
+	if (buf)
+		free(buf);
+
+	return (rv);
+}
+
+int
+main(int argc, char *argv[])
+{
+	int			c, i, operation = OPC_INVALID, rv = 1;
+	char			*error = "no error";
+
+	while ((c = getopt(argc, argv, "R:ab:i:r:qo:v")) != -1) {
 		switch (c) {
 		case 'R':
 			/* result file */
@@ -367,6 +623,9 @@ main(int argc, char *argv[])
 		case 'b':
 			/* read/write block size */
 			bs = getbs(optarg);
+			break;
+		case 'i':
+			infile = optarg;
 			break;
 		case 'o':
 			/* out file or disk */
@@ -407,21 +666,36 @@ main(int argc, char *argv[])
 	if (bs % DEV_BSIZE)
 		errx(1, "block size must be divisible by 512");
 
+	/* handle some signals */
+	installsignal(SIGINT, "INT");
+	installsignal(SIGHUP, "HUP");
+	installsignal(SIGQUIT, "QUIT");
+	installsignal(SIGTERM, "TERM");
+
+	/* do minimal parameter verification */
 	switch (operation) {
 	case OPC_VERIFY:
 		if (rawdev == NULL) {
 			error = "must supply raw device";
 			goto iargs;
 		}
-		if (outfile != NULL) {
+		if (outfile) {
 			error = "must not supply an out file";
 			goto iargs;
 		}
-		if (resfile != NULL) {
+		if (infile) {
+			error = "must not supply an in file";
+			goto iargs;
+		}
+		if (resfile) {
 			error = "must not supply a results file";
 			goto iargs;
 		}
+
+		/* attempt verify */
+		rv = recover_verify(OPC_VERIFY);
 		break;
+
 	case OPC_RECOVER:
 		if (rawdev == NULL) {
 			error = "must supply raw device";
@@ -431,6 +705,35 @@ main(int argc, char *argv[])
 			error = "must supply an out file";
 			goto iargs;
 		}
+		if (infile) {
+			error = "must not supply an in file";
+			goto iargs;
+		}
+
+		/* attempt recovery */
+		rv = recover_verify(OPC_RECOVER);
+		break;
+
+	case OPC_RESTORE:
+		if (rawdev) {
+			error = "must not supply a raw device";
+			goto iargs;
+		}
+		if (outfile == NULL) {
+			error = "must supply an out file";
+			goto iargs;
+		}
+		if (infile == NULL) {
+			error = "must supply an in file";
+			goto iargs;
+		}
+		if (resfile) {
+			error = "must not supply a results file";
+			goto iargs;
+		}
+
+		/* attemp restore */
+		rv = restore(OPC_RESTORE);
 		break;
 
 	case OPC_INVALID:
@@ -440,168 +743,5 @@ iargs:
 		    ops[operation].op, error);
 	}
 
-	/* are we the full raw device? */
-	if (rawdev == NULL)
-		errx(1, "must supply raw device");
-	if (lstat(rawdev, &sb))
-		err(1, "lstat");
-	if (!S_ISCHR(sb.st_mode))
-		errx(1, "not a raw device");
-	if (rawdev[strlen(rawdev) - 1] != 'c')
-		errx(1, "must use c partition");
-
-	/* open raw disk */
-	if ((fd = open(rawdev, O_RDWR, 0)) == -1)
-		err(1, "can't open %s", rawdev);
-	if (rawsize(fd, &size))
-		errx(1, "can't obtain raw size");
-	if (size == 0)
-		errx(1, "invalid disk size");
-
-	/* open results file */
-	bzero(&hdr, sizeof hdr);
-	if (resfile != NULL) {
-		if (!lstat(resfile, &sb))
-			exists = 1;
-		if ((resfd = fopen(resfile, "a+")) == NULL)
-			err(1, "results file");
-
-		if (exists) {
-			/* retrieve state */
-			if (outfile)
-				errx(1,
-				    "can't specify outfile when restarting");
-			if (bs != DEV_BSIZE)
-				errx(1,
-				    "can't specify block size when restarting");
-			mode = "r+";
-			/* get parameters from results file */
-			if (hdr_read(resfd, &hdr))
-				errx(1, "invalid header");
-			if (hdr.disk_sz != size)
-				errx(1, "invalid disk size in header");
-			if (hdr.block_sz % DEV_BSIZE)
-				errx(1, "invalid block size in header");
-			if (strlen(hdr.output) == 0)
-				errx(1, "invalid filename in header");
-
-			bs = hdr.block_sz;
-			outfile = hdr.output;
-		} else {
-			/* get state from options */
-			mode = "w+";
-			hdr.disk_sz = size;
-			hdr.block_sz = bs;
-			if (outfile)
-				strlcpy(hdr.output, outfile, sizeof hdr.output);
-
-			if (hdr_write(resfd, &hdr))
-				err(1, "hdr_write");
-		}
-	}
-
-	/* open out file */
-	if (outfile) {
-		if ((ofd = fopen(outfile, mode)) == NULL)
-			err(1, "fopen outfile");
-
-		if (exists) {
-			/* read res file and validate integrity */
-			if (lstat(outfile, &sb))
-				err(1, "lstat outfile");
-
-			bzero(&entry, sizeof entry);
-			entry.size = bs;
-			do {
-				if (ent_read(resfd, ofd, &entry))
-					break;
-				print_perc(sb.st_size, entry.offset,
-				    "validating", NULL);
-			} while (!feof(resfd));
-			print_perc(1, 1, "validating", "\n"); /* 100% */
-
-			start = entry.offset + entry.size;
-
-			if (start >= size) {
-				if (!quiet)
-					printf("no need to restart\n");
-				goto done;
-			}
-
-			/* setup size */
-			sz = MIN(size - offs, bs);
-			if (fseeko(ofd, start, SEEK_SET))
-				err(1, "fseeko");
-			if (!quiet)
-				printf("restarting at: %llu\n", start);
-		}
-	}
-
-	/* here we go */
-	inbuf = malloc(bs);
-	if (inbuf == NULL)
-		err(1, "inbuf");
-
-	/* handle some signals */
-	installsignal(SIGINT, "INT");
-	installsignal(SIGHUP, "HUP");
-	installsignal(SIGQUIT, "QUIT");
-	installsignal(SIGTERM, "TERM");
-
-	for (offs = start; offs < size; offs += sz) {
-		sz = MIN(size - offs, bs);
-
-		rv = readoffset(offs, fd, inbuf, sz);
-		if (rv == 0)
-			errx(1, "unexpected eof");
-		else if (rv == -1) {
-			if (abort_on_error) {
-				printf("read failed, aborting\n");
-				goto done;
-			}
-
-			/* make sure we are flushed before we recover */
-			fflush(ofd);
-			fflush(resfd);
-
-			rv = recover(offs, fd, inbuf, sz);
-			if (rv == 0)
-				errx(1, "full recover unexpected eof");
-			else if (rv == -1)
-				errx(1, "full recover failed");
-			else if (rv != sz)
-				errx(1, "invalid size recovered");
-		}
-
-		if (outfile)
-			if (fwrite(inbuf, sz, 1, ofd) == -1)
-				err(1, "fwrite");
-
-		if (resfile) {
-			if (ent_write(resfd, offs, sz, inbuf))
-				errx(1, "can't write results");
-		}
-
-		print_perc(size, offs, ops[operation].op, NULL);
-		if (running == 0) {
-			if (!quiet)
-				printf("\nterminating\n");
-			break;
-		}
-	}
-	if (running == 1)
-		print_perc(1, 1, ops[operation].op, "\n"); /* 100% */
-
-done:
-	if (ofd) {
-		fflush(ofd);
-		fclose(ofd);
-	}
-	if (resfd) {
-		fflush(resfd);
-		fclose(resfd);
-	}
-	close(fd);
-
-	return (0);
+	return (rv);
 }
