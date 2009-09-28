@@ -577,8 +577,8 @@ done:
 	}
 	if (resfd) {
 		fflush(resfd);
-		fclose(resfd)
-	};
+		fclose(resfd);
+	}
 	close(fd);
 
 	return (0);
