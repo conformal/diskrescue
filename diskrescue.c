@@ -325,6 +325,22 @@ usage(void)
 	
 	exit(1);
 }
+
+void
+print_perc(daddr64_t size, daddr64_t offs, char *s, char *cr)
+{
+	double			p;
+
+	if (quiet)
+		return;
+
+	p = 1 - (((double)size - (double)offs) / (double)size);
+	printf("\r%s: %.1f%%", s, p * 100);
+	if (cr)
+		printf("%s", cr);
+	fflush(stdout);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -336,7 +352,6 @@ main(int argc, char *argv[])
 	int			abort_on_error = 0;
 	char			*inbuf, *error = "no error", *mode = "w+";
 	struct stat		sb;
-	double			p = 0;
 	struct dr_hdr		hdr;
 	struct dr_entry		entry;
 
@@ -400,6 +415,10 @@ main(int argc, char *argv[])
 		}
 		if (outfile != NULL) {
 			error = "must not supply an out file";
+			goto iargs;
+		}
+		if (resfile != NULL) {
+			error = "must not supply a results file";
 			goto iargs;
 		}
 		break;
@@ -487,12 +506,20 @@ iargs:
 			err(1, "fopen outfile");
 
 		if (exists) {
+			/* read res file and validate integrity */
+			if (lstat(outfile, &sb))
+				err(1, "lstat outfile");
+
 			bzero(&entry, sizeof entry);
 			entry.size = bs;
 			do {
 				if (ent_read(resfd, ofd, &entry))
 					break;
+				print_perc(sb.st_size, entry.offset,
+				    "validating", NULL);
 			} while (!feof(resfd));
+			print_perc(1, 1, "validating", "\n"); /* 100% */
+
 			start = entry.offset + entry.size;
 
 			if (start >= size) {
@@ -555,20 +582,15 @@ iargs:
 				errx(1, "can't write results");
 		}
 
-		if (!quiet) {
-			p = 1 - (((double)size - (double)offs) / (double)size);
-			printf("\r%.1f%%", p * 100);
-			fflush(stdout);
-		}
-
+		print_perc(size, offs, ops[operation].op, NULL);
 		if (running == 0) {
 			if (!quiet)
-				printf("terminating\n");
+				printf("\nterminating\n");
 			break;
 		}
 	}
-	if (!quiet && running == 1)
-		printf("\r%.1f%%\n", 100.0);
+	if (running == 1)
+		print_perc(1, 1, ops[operation].op, "\n"); /* 100% */
 
 done:
 	if (ofd) {
