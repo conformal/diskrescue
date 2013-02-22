@@ -154,7 +154,7 @@ ent_write(FILE *f, daddr64_t offset, daddr64_t sz, char *inbuf)
 		return (-1);
 
 	SHA1Init(&ctx);
-	SHA1Update(&ctx, inbuf, sz);
+	SHA1Update(&ctx, (const unsigned char *)inbuf, sz);
 	SHA1Final((u_int8_t *)&digest, &ctx);
 	for (i = 0; i < SHA1_DIGEST_LENGTH; i++)
 		snprintf(&digest_text[i * 2], 3, "%02x", digest[i]);
@@ -354,7 +354,7 @@ recover_verify(int operation)
 	FILE			*ofd = NULL;
 	int			retval = 1;
 	daddr64_t		size = 0;
-	daddr64_t		offs, sz, start = 0;
+	daddr64_t		offs = 0, sz, start = 0;
 	int			rv, fd, exists = 0;
 	char			*inbuf, *mode = "w+";
 	struct stat		sb;
